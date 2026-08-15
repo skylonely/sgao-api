@@ -5,6 +5,7 @@ export default {
 		if (url.pathname === '/') {
 			return Response.json({
 				name: 'sgao-api',
+				version: '0.1.0',
 				message: 'Welcome to SGAO API',
 			});
 		}
