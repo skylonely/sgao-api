@@ -10,7 +10,14 @@
 	"observability": {
 		"enabled": true
 	},
-	"upload_source_maps": true
+	"upload_source_maps": true,
+	"d1_databases": [
+		{
+			"binding": "CHECKLISTS_DB",
+			"database_name": "sgao-api-checklists",
+			"database_id": "a2c43ade-2a2e-4156-aa38-bee17410286c"
+		}
+	]
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

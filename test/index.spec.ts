@@ -4,7 +4,7 @@ import {
 	waitOnExecutionContext,
 	SELF,
 } from "cloudflare:test";
-import { describe, it, expect } from "vitest";
+import { beforeEach, describe, it, expect } from "vitest";
 import worker from "../src/index";
 
 // For now, you'll need to do something like this to get a correctly-typed
@@ -12,6 +12,19 @@ import worker from "../src/index";
 const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 describe("sgao-api worker", () => {
+	beforeEach(async () => {
+		await env.CHECKLISTS_DB.exec(`
+			DROP TABLE IF EXISTS checklist_items;
+			CREATE TABLE checklist_items (
+				visitor_id TEXT NOT NULL,
+				trip_id TEXT NOT NULL,
+				item_id TEXT NOT NULL,
+				checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (visitor_id, trip_id, item_id)
+			);
+		`);
+	});
+
 	it("returns service metadata from the root endpoint (unit style)", async () => {
 		const request = new IncomingRequest("http://example.com");
 		// Create an empty context to pass to `worker.fetch()`.
@@ -32,6 +45,36 @@ describe("sgao-api worker", () => {
 			name: "sgao-api",
 			version: "0.1.0",
 			message: "Welcome to SGAO API",
+		});
+	});
+
+	it("persists an anonymous visitor's checklist items", async () => {
+		const visitorId = "f4d1456f-8590-4acf-9c0e-4c6b6e7d4e81";
+		const headers = {
+			Origin: "https://travel.sgao.cc",
+			"X-Checklist-Visitor": visitorId,
+		};
+
+		const updateResponse = await worker.fetch(
+			new IncomingRequest("https://api.sgao.cc/v1/checklists/shenyang-dandong-dalian/items/id-card", {
+				method: "PUT",
+				headers: { ...headers, "Content-Type": "application/json" },
+				body: JSON.stringify({ checked: true }),
+			}),
+			env,
+			createExecutionContext(),
+		);
+		expect(updateResponse.status).toBe(200);
+		expect(updateResponse.headers.get("Access-Control-Allow-Origin")).toBe("https://travel.sgao.cc");
+
+		const readResponse = await worker.fetch(
+			new IncomingRequest("https://api.sgao.cc/v1/checklists/shenyang-dandong-dalian", { headers }),
+			env,
+			createExecutionContext(),
+		);
+		expect(await readResponse.json()).toEqual({
+			tripId: "shenyang-dandong-dalian",
+			checkedItemIds: ["id-card"],
 		});
 	});
 });
