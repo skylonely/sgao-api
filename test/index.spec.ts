@@ -13,16 +13,16 @@ const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
 
 describe("sgao-api worker", () => {
 	beforeEach(async () => {
-		await env.CHECKLISTS_DB.exec(`
-			DROP TABLE IF EXISTS checklist_items;
-			CREATE TABLE checklist_items (
+		await env.CHECKLISTS_DB.prepare("DROP TABLE IF EXISTS checklist_items").run();
+		await env.CHECKLISTS_DB.prepare(
+			`CREATE TABLE checklist_items (
 				visitor_id TEXT NOT NULL,
 				trip_id TEXT NOT NULL,
 				item_id TEXT NOT NULL,
 				checked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY (visitor_id, trip_id, item_id)
-			);
-		`);
+			)`,
+		).run();
 	});
 
 	it("returns service metadata from the root endpoint (unit style)", async () => {
@@ -56,7 +56,7 @@ describe("sgao-api worker", () => {
 		};
 
 		const updateResponse = await worker.fetch(
-			new IncomingRequest("https://api.sgao.cc/v1/checklists/shenyang-dandong-dalian/items/id-card", {
+			new IncomingRequest("https://api.sgao.cc/api/v1/checklists/shenyang-dandong-dalian/items/id-card", {
 				method: "PUT",
 				headers: { ...headers, "Content-Type": "application/json" },
 				body: JSON.stringify({ checked: true }),
@@ -66,15 +66,51 @@ describe("sgao-api worker", () => {
 		);
 		expect(updateResponse.status).toBe(200);
 		expect(updateResponse.headers.get("Access-Control-Allow-Origin")).toBe("https://travel.sgao.cc");
+		expect(await updateResponse.json()).toEqual({
+			data: {
+				tripId: "shenyang-dandong-dalian",
+				itemId: "id-card",
+				checked: true,
+			},
+		});
 
 		const readResponse = await worker.fetch(
-			new IncomingRequest("https://api.sgao.cc/v1/checklists/shenyang-dandong-dalian", { headers }),
+			new IncomingRequest("https://api.sgao.cc/api/v1/checklists/shenyang-dandong-dalian", { headers }),
 			env,
 			createExecutionContext(),
 		);
 		expect(await readResponse.json()).toEqual({
+			data: {
+				tripId: "shenyang-dandong-dalian",
+				checkedItemIds: ["id-card"],
+			},
+		});
+
+		const legacyResponse = await worker.fetch(
+			new IncomingRequest("https://api.sgao.cc/v1/checklists/shenyang-dandong-dalian", { headers }),
+			env,
+			createExecutionContext(),
+		);
+		expect(await legacyResponse.json()).toEqual({
 			tripId: "shenyang-dandong-dalian",
 			checkedItemIds: ["id-card"],
 		});
+	});
+
+	it("handles checklist CORS preflight requests", async () => {
+		const response = await worker.fetch(
+			new IncomingRequest("https://api.sgao.cc/api/v1/checklists/shenyang-dandong-dalian", {
+				method: "OPTIONS",
+				headers: {
+					Origin: "https://travel.sgao.cc",
+					"Access-Control-Request-Method": "PUT",
+				},
+			}),
+			env,
+			createExecutionContext(),
+		);
+
+		expect(response.status).toBe(204);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://travel.sgao.cc");
 	});
 });

@@ -28,12 +28,17 @@ not an account or a personal profile. Only requests from `https://travel.sgao.cc
 are allowed to call these endpoints from a browser.
 
 ```text
-GET /v1/checklists/:tripId
-PUT /v1/checklists/:tripId/items/:itemId
+GET /api/v1/checklists/:tripId
+PUT /api/v1/checklists/:tripId/items/:itemId
 ```
 
-Pass the identifier in the `X-Checklist-Visitor` header. A `GET` returns
-`{ tripId, checkedItemIds }`. A `PUT` accepts `{ checked: true | false }`.
+Pass the identifier in the `X-Checklist-Visitor` header. A successful response
+uses `{ data: ... }`; errors use `{ error: { code, message } }`. A `GET`
+returns `{ data: { tripId, checkedItemIds } }`. A `PUT` accepts
+`{ checked: true | false }`.
+
+The former `/v1/checklists/...` endpoints remain available temporarily with the
+original response shape for compatibility.
 
 ```ts
 const API_ORIGIN = "https://api.sgao.cc";
@@ -52,12 +57,12 @@ const headers = {
 };
 
 export async function loadChecklist() {
-  const response = await fetch(`${API_ORIGIN}/v1/checklists/${tripId}`, { headers });
+  const response = await fetch(`${API_ORIGIN}/api/v1/checklists/${tripId}`, { headers });
   return response.json();
 }
 
 export async function setChecked(itemId: string, checked: boolean) {
-  await fetch(`${API_ORIGIN}/v1/checklists/${tripId}/items/${itemId}`, {
+  await fetch(`${API_ORIGIN}/api/v1/checklists/${tripId}/items/${itemId}`, {
     method: "PUT",
     headers,
     body: JSON.stringify({ checked }),
