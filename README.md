@@ -37,8 +37,7 @@ uses `{ data: ... }`; errors use `{ error: { code, message } }`. A `GET`
 returns `{ data: { tripId, checkedItemIds } }`. A `PUT` accepts
 `{ checked: true | false }`.
 
-The former `/v1/checklists/...` endpoints remain available temporarily with the
-original response shape for compatibility.
+The only supported checklist API prefix is `/api/v1/...`.
 
 ```ts
 const API_ORIGIN = "https://api.sgao.cc";

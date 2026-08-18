@@ -86,14 +86,14 @@ describe("sgao-api worker", () => {
 			},
 		});
 
-		const legacyResponse = await worker.fetch(
+		const removedLegacyResponse = await worker.fetch(
 			new IncomingRequest("https://api.sgao.cc/v1/checklists/shenyang-dandong-dalian", { headers }),
 			env,
 			createExecutionContext(),
 		);
-		expect(await legacyResponse.json()).toEqual({
-			tripId: "shenyang-dandong-dalian",
-			checkedItemIds: ["id-card"],
+		expect(removedLegacyResponse.status).toBe(404);
+		expect(await removedLegacyResponse.json()).toEqual({
+			error: { code: "NOT_FOUND", message: "API route not found" },
 		});
 	});
 

@@ -10,11 +10,9 @@ type AppEnv = { Bindings: Env };
 type ChecklistUpdate = { checked?: unknown };
 type ChecklistState = { tripId: string; checkedItemIds: string[] };
 type ChecklistItemState = { tripId: string; itemId: string; checked: boolean };
-type ApiPayload = ChecklistState | ChecklistItemState;
 
 const app = new Hono<AppEnv>();
 const apiV1 = new Hono<AppEnv>();
-const legacyV1 = new Hono<AppEnv>();
 
 const checklistCors = cors({
 	origin: TRAVEL_ORIGIN,
@@ -36,11 +34,7 @@ function validIdentifier(value: string): boolean {
 	return IDENTIFIER_PATTERN.test(value);
 }
 
-function registerChecklistRoutes(
-	router: Hono<AppEnv>,
-	respond: (c: Context<AppEnv>, payload: ApiPayload) => Response,
-) {
-	router.get('/checklists/:tripId', async (c) => {
+apiV1.get('/checklists/:tripId', async (c) => {
 		const tripId = c.req.param('tripId');
 		const anonymousVisitorId = visitorId(c);
 
@@ -57,10 +51,10 @@ function registerChecklistRoutes(
 			.bind(anonymousVisitorId, tripId)
 			.all<{ item_id: string }>();
 
-		return respond(c, { tripId, checkedItemIds: results.map((item) => item.item_id) });
+		return c.json({ data: { tripId, checkedItemIds: results.map((item) => item.item_id) } });
 	});
 
-	router.put('/checklists/:tripId/items/:itemId', async (c) => {
+apiV1.put('/checklists/:tripId/items/:itemId', async (c) => {
 		const { tripId, itemId } = c.req.param();
 		const anonymousVisitorId = visitorId(c);
 
@@ -95,9 +89,8 @@ function registerChecklistRoutes(
 				.run();
 		}
 
-		return respond(c, { tripId, itemId, checked: payload.checked });
+		return c.json({ data: { tripId, itemId, checked: payload.checked } });
 	});
-}
 
 app.get('/', (c) =>
 	c.json({
@@ -116,13 +109,8 @@ app.get('/health', (c) =>
 );
 
 app.use('/api/*', checklistCors);
-app.use('/v1/*', checklistCors);
-
-registerChecklistRoutes(apiV1, (c, payload) => c.json({ data: payload }));
-registerChecklistRoutes(legacyV1, (c, payload) => c.json(payload));
 
 app.route('/api/v1', apiV1);
-app.route('/v1', legacyV1);
 
 app.notFound((c) => apiError(c, 404, 'NOT_FOUND', 'API route not found'));
 app.onError((error, c) => {
