@@ -31,7 +31,8 @@ describe("sgao-api worker", () => {
 			env.CHECKLISTS_DB.prepare(`CREATE TABLE account_profiles (
 				account_id TEXT PRIMARY KEY,
 				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				revision INTEGER NOT NULL DEFAULT 0
 			)`),
 			env.CHECKLISTS_DB.prepare(`CREATE TABLE account_checklists (
 				account_id TEXT NOT NULL,
@@ -186,11 +187,19 @@ describe("sgao-api worker", () => {
 			ctx,
 		);
 		const emptyBody = await emptyResponse.json() as {
-			data: { initialized: boolean; account: { id: string; email: string }; lists: unknown[] };
+			data: {
+				initialized: boolean;
+				account: { id: string; email: string };
+				revision: number;
+				updatedAt: string | null;
+				lists: unknown[];
+			};
 		};
 		expect(emptyBody.data.initialized).toBe(false);
 		expect(emptyBody.data.account.email).toBe("owner@sgao.cc");
 		expect(emptyBody.data.account.id).toHaveLength(64);
+		expect(emptyBody.data.revision).toBe(0);
+		expect(emptyBody.data.updatedAt).toBeNull();
 		expect(emptyBody.data.lists).toEqual([]);
 
 		const lists = [{
@@ -207,13 +216,15 @@ describe("sgao-api worker", () => {
 			new IncomingRequest("https://api.sgao.cc/checklists", {
 				method: "POST",
 				headers: { "Content-Type": "text/plain;charset=UTF-8" },
-				body: JSON.stringify({ lists }),
+				body: JSON.stringify({ revision: 0, lists }),
 			}),
 			env,
 			createExecutionContext(),
 		);
 		expect(saveResponse.status).toBe(200);
-		expect(await saveResponse.json()).toEqual({ data: { saved: true, listCount: 1 } });
+		expect(await saveResponse.json()).toMatchObject({
+			data: { saved: true, listCount: 1, revision: 1 },
+		});
 
 		const readResponse = await api.fetch(
 			new IncomingRequest("https://api.sgao.cc/checklists"),
@@ -221,7 +232,31 @@ describe("sgao-api worker", () => {
 			createExecutionContext(),
 		);
 		expect(await readResponse.json()).toMatchObject({
-			data: { initialized: true, lists },
+			data: { initialized: true, revision: 1, lists },
+		});
+
+		const staleLists = [{ ...lists[0], title: "过期修改" }];
+		const conflictResponse = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists", {
+				method: "POST",
+				headers: { "Content-Type": "text/plain;charset=UTF-8" },
+				body: JSON.stringify({ revision: 0, lists: staleLists }),
+			}),
+			env,
+			createExecutionContext(),
+		);
+		expect(conflictResponse.status).toBe(409);
+		expect(await conflictResponse.json()).toEqual({
+			error: { code: "SYNC_CONFLICT", message: "The account snapshot changed on another device" },
+		});
+
+		const afterConflictResponse = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists"),
+			env,
+			createExecutionContext(),
+		);
+		expect(await afterConflictResponse.json()).toMatchObject({
+			data: { revision: 1, lists },
 		});
 	});
 
@@ -231,7 +266,7 @@ describe("sgao-api worker", () => {
 			new IncomingRequest("https://api.sgao.cc/checklists", {
 				method: "POST",
 				headers: { "Content-Type": "text/plain;charset=UTF-8" },
-				body: JSON.stringify({ lists: [{ id: "bad id" }] }),
+				body: JSON.stringify({ revision: 0, lists: [{ id: "bad id" }] }),
 			}),
 			env,
 			createExecutionContext(),

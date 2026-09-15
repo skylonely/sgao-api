@@ -89,16 +89,19 @@ GET  /api/v1/account/checklists
 POST /api/v1/account/checklists
 ```
 
-`GET /checklists` returns the full account snapshot. The first `POST` initializes
-the account; later posts atomically replace the small snapshot. Browser requests
-are credentialed and allowed only from `https://todo.sgao.cc`. The write uses
-`text/plain` JSON so it remains a simple CORS request and does not require an
-unauthenticated preflight through Access.
+`GET /checklists` returns the full account snapshot together with `revision` and
+`updatedAt`. A `POST` must send the revision it last read alongside `lists`.
+Writes atomically replace the small snapshot and increment the revision; a stale
+revision returns `409 SYNC_CONFLICT` without changing stored data. Browser
+requests are credentialed and allowed only from `https://todo.sgao.cc`. The
+write uses `text/plain` JSON so it remains a simple CORS request and does not
+require an unauthenticated preflight through Access.
 
 Apply the account schema before deploying:
 
 ```sh
 npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0002_account_checklists.sql
+npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0003_account_revision.sql
 ```
 
 In Cloudflare Zero Trust, create a self-hosted application for only the account

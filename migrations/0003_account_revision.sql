@@ -1,0 +1,2 @@
+ALTER TABLE account_profiles
+  ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;

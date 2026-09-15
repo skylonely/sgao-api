@@ -21,7 +21,7 @@ type SyncedChecklist = {
 	items: SyncedItem[];
 };
 
-function apiError(c: Context<AppEnv>, status: 400 | 401 | 404 | 500, code: string, message: string) {
+function apiError(c: Context<AppEnv>, status: 400 | 401 | 404 | 409 | 500, code: string, message: string) {
 	return c.json({ error: { code, message } }, status);
 }
 
@@ -87,6 +87,14 @@ export function parseSnapshot(value: unknown): SyncedChecklist[] | undefined {
 	return parsed;
 }
 
+function parseRevision(value: unknown): number | undefined {
+	if (!value || typeof value !== 'object') return undefined;
+	const revision = (value as { revision?: unknown }).revision;
+	return typeof revision === 'number' && Number.isSafeInteger(revision) && revision >= 0
+		? revision
+		: undefined;
+}
+
 export async function accountId(email: string): Promise<string> {
 	const digest = await crypto.subtle.digest(
 		'SHA-256',
@@ -139,10 +147,12 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 		if (!signedIn) return apiError(c, 401, 'AUTH_REQUIRED', 'Sign in is required');
 
 		const profile = await c.env.CHECKLISTS_DB.prepare(
-			'SELECT account_id FROM account_profiles WHERE account_id = ?',
-		).bind(signedIn.id).first<{ account_id: string }>();
+			`SELECT account_id, revision,
+				strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
+			FROM account_profiles WHERE account_id = ?`,
+		).bind(signedIn.id).first<{ account_id: string; revision: number; updated_at: string }>();
 		if (!profile) {
-			return c.json({ data: { account: signedIn, initialized: false, lists: [] } });
+			return c.json({ data: { account: signedIn, initialized: false, revision: 0, updatedAt: null, lists: [] } });
 		}
 
 		const [listsResult, itemsResult] = await c.env.CHECKLISTS_DB.batch([
@@ -167,7 +177,15 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 			description: String(row.description),
 			items: itemsByList.get(String(row.checklist_id)) ?? [],
 		}));
-		return c.json({ data: { account: signedIn, initialized: true, lists } });
+		return c.json({
+			data: {
+				account: signedIn,
+				initialized: true,
+				revision: Number(profile.revision),
+				updatedAt: profile.updated_at,
+				lists,
+			},
+		});
 	});
 
 	accountApi.post('/checklists', async (c) => {
@@ -179,15 +197,27 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 		} catch {
 			return apiError(c, 400, 'VALIDATION_ERROR', 'Request body must be valid JSON');
 		}
+		const revision = parseRevision(payload);
+		if (revision === undefined) return apiError(c, 400, 'VALIDATION_ERROR', 'Snapshot revision is invalid');
 		const lists = parseSnapshot(payload);
 		if (!lists) return apiError(c, 400, 'VALIDATION_ERROR', 'Checklist snapshot is invalid');
 
 		const statements: D1PreparedStatement[] = [
 			c.env.CHECKLISTS_DB.prepare(
-				'INSERT INTO account_profiles (account_id) VALUES (?) ON CONFLICT(account_id) DO UPDATE SET updated_at = CURRENT_TIMESTAMP',
-			).bind(signedIn.id),
-			c.env.CHECKLISTS_DB.prepare('DELETE FROM account_checklist_items WHERE account_id = ?').bind(signedIn.id),
-			c.env.CHECKLISTS_DB.prepare('DELETE FROM account_checklists WHERE account_id = ?').bind(signedIn.id),
+				'INSERT INTO account_profiles (account_id, revision) SELECT ?, 0 WHERE ? = 0 ON CONFLICT(account_id) DO NOTHING',
+			).bind(signedIn.id, revision),
+			c.env.CHECKLISTS_DB.prepare(
+				`DELETE FROM account_checklist_items
+				WHERE account_id = ? AND EXISTS (
+					SELECT 1 FROM account_profiles WHERE account_id = ? AND revision = ?
+				)`,
+			).bind(signedIn.id, signedIn.id, revision),
+			c.env.CHECKLISTS_DB.prepare(
+				`DELETE FROM account_checklists
+				WHERE account_id = ? AND EXISTS (
+					SELECT 1 FROM account_profiles WHERE account_id = ? AND revision = ?
+				)`,
+			).bind(signedIn.id, signedIn.id, revision),
 		];
 		const listRows = lists.map((list, position): Array<string | number> => [
 			signedIn.id, list.id, list.slug, list.title, list.description, position,
@@ -196,8 +226,13 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 			const rows = listRows.slice(index, index + ROWS_PER_INSERT);
 			const placeholders = rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
 			statements.push(c.env.CHECKLISTS_DB.prepare(
-				`INSERT INTO account_checklists (account_id, checklist_id, slug, title, description, position) VALUES ${placeholders}`,
-			).bind(...rows.flat()));
+				`WITH rows(account_id, checklist_id, slug, title, description, position) AS (VALUES ${placeholders})
+				INSERT INTO account_checklists (account_id, checklist_id, slug, title, description, position)
+				SELECT account_id, checklist_id, slug, title, description, position FROM rows
+				WHERE EXISTS (
+					SELECT 1 FROM account_profiles WHERE account_id = ? AND revision = ?
+				)`,
+			).bind(...rows.flat(), signedIn.id, revision));
 		}
 		const itemRows = lists.flatMap((list) => list.items.map((item, position): Array<string | number> => [
 			signedIn.id, list.id, item.id, item.label, item.checked ? 1 : 0, position,
@@ -206,11 +241,38 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 			const rows = itemRows.slice(index, index + ROWS_PER_INSERT);
 			const placeholders = rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
 			statements.push(c.env.CHECKLISTS_DB.prepare(
-				`INSERT INTO account_checklist_items (account_id, checklist_id, item_id, label, checked, position) VALUES ${placeholders}`,
-			).bind(...rows.flat()));
+				`WITH rows(account_id, checklist_id, item_id, label, checked, position) AS (VALUES ${placeholders})
+				INSERT INTO account_checklist_items (account_id, checklist_id, item_id, label, checked, position)
+				SELECT account_id, checklist_id, item_id, label, checked, position FROM rows
+				WHERE EXISTS (
+					SELECT 1 FROM account_profiles WHERE account_id = ? AND revision = ?
+				)`,
+			).bind(...rows.flat(), signedIn.id, revision));
 		}
-		await c.env.CHECKLISTS_DB.batch(statements);
-		return c.json({ data: { saved: true, listCount: lists.length } });
+		statements.push(c.env.CHECKLISTS_DB.prepare(
+			`UPDATE account_profiles
+			SET revision = revision + 1, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+			WHERE account_id = ? AND revision = ?`,
+		).bind(signedIn.id, revision));
+		const results = await c.env.CHECKLISTS_DB.batch(statements);
+		const revisionUpdate = results.at(-1);
+		if (!revisionUpdate || revisionUpdate.meta.changes !== 1) {
+			return apiError(c, 409, 'SYNC_CONFLICT', 'The account snapshot changed on another device');
+		}
+
+		const savedProfile = await c.env.CHECKLISTS_DB.prepare(
+			`SELECT revision, strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
+			FROM account_profiles WHERE account_id = ?`,
+		).bind(signedIn.id).first<{ revision: number; updated_at: string }>();
+		if (!savedProfile) return apiError(c, 500, 'INTERNAL_ERROR', 'Saved account profile is unavailable');
+		return c.json({
+			data: {
+				saved: true,
+				listCount: lists.length,
+				revision: Number(savedProfile.revision),
+				updatedAt: savedProfile.updated_at,
+			},
+		});
 	});
 
 	return accountApi;
