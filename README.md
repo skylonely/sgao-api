@@ -74,3 +74,34 @@ Apply the D1 schema before deploying the Worker:
 ```sh
 npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0001_checklist_items.sql
 ```
+
+Account checklist sync
+
+Account endpoints are intended to be protected by a hostname/path Cloudflare
+Access application for `api.sgao.cc/api/v1/account/*`. The Worker reads the
+verified email from `ctx.access`; it never accepts an email from the request and
+stores only a SHA-256 account identifier in D1.
+
+```text
+GET  /api/v1/account/login?returnTo=https://todo.sgao.cc/...
+GET  /api/v1/account/session
+GET  /api/v1/account/checklists
+POST /api/v1/account/checklists
+```
+
+`GET /checklists` returns the full account snapshot. The first `POST` initializes
+the account; later posts atomically replace the small snapshot. Browser requests
+are credentialed and allowed only from `https://todo.sgao.cc`. The write uses
+`text/plain` JSON so it remains a simple CORS request and does not require an
+unauthenticated preflight through Access.
+
+Apply the account schema before deploying:
+
+```sh
+npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0002_account_checklists.sql
+```
+
+In Cloudflare Zero Trust, create a self-hosted application for only the account
+path above and add an Allow policy for the intended email address(es). Do not
+protect all of `api.sgao.cc`, because the existing anonymous checklist endpoints
+must remain public.

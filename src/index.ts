@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Context } from 'hono';
+import { createAccountApi } from './account';
 
 const TRAVEL_ORIGIN = 'https://travel.sgao.cc';
+const TODO_ORIGIN = 'https://todo.sgao.cc';
 const VISITOR_ID_PATTERN = /^[a-z0-9_-]{16,128}$/i;
 const IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/;
 
@@ -18,6 +20,14 @@ const checklistCors = cors({
 	origin: TRAVEL_ORIGIN,
 	allowMethods: ['GET', 'PUT', 'OPTIONS'],
 	allowHeaders: ['Content-Type', 'X-Checklist-Visitor'],
+	maxAge: 86_400,
+});
+
+const accountCors = cors({
+	origin: TODO_ORIGIN,
+	allowMethods: ['GET', 'POST', 'OPTIONS'],
+	allowHeaders: ['Content-Type'],
+	credentials: true,
 	maxAge: 86_400,
 });
 
@@ -95,7 +105,7 @@ apiV1.put('/checklists/:tripId/items/:itemId', async (c) => {
 app.get('/', (c) =>
 	c.json({
 		name: 'sgao-api',
-		version: '0.1.0',
+		version: '0.2.0',
 		message: 'Welcome to SGAO API',
 	}),
 );
@@ -108,8 +118,10 @@ app.get('/health', (c) =>
 	}),
 );
 
-app.use('/api/*', checklistCors);
+app.use('/api/v1/checklists/*', checklistCors);
+app.use('/api/v1/account/*', accountCors);
 
+apiV1.route('/account', createAccountApi());
 app.route('/api/v1', apiV1);
 
 app.notFound((c) => apiError(c, 404, 'NOT_FOUND', 'API route not found'));

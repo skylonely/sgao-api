@@ -6,6 +6,7 @@ import {
 } from "cloudflare:test";
 import { beforeEach, describe, it, expect } from "vitest";
 import worker from "../src/index";
+import { createAccountApi } from "../src/account";
 
 // For now, you'll need to do something like this to get a correctly-typed
 // `Request` to pass to `worker.fetch()`.
@@ -23,6 +24,37 @@ describe("sgao-api worker", () => {
 				PRIMARY KEY (visitor_id, trip_id, item_id)
 			)`,
 		).run();
+		await env.CHECKLISTS_DB.prepare("DROP TABLE IF EXISTS account_checklist_items").run();
+		await env.CHECKLISTS_DB.prepare("DROP TABLE IF EXISTS account_checklists").run();
+		await env.CHECKLISTS_DB.prepare("DROP TABLE IF EXISTS account_profiles").run();
+		await env.CHECKLISTS_DB.batch([
+			env.CHECKLISTS_DB.prepare(`CREATE TABLE account_profiles (
+				account_id TEXT PRIMARY KEY,
+				created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+			)`),
+			env.CHECKLISTS_DB.prepare(`CREATE TABLE account_checklists (
+				account_id TEXT NOT NULL,
+				checklist_id TEXT NOT NULL,
+				slug TEXT NOT NULL,
+				title TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '',
+				position INTEGER NOT NULL,
+				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (account_id, checklist_id),
+				UNIQUE (account_id, slug)
+			)`),
+			env.CHECKLISTS_DB.prepare(`CREATE TABLE account_checklist_items (
+				account_id TEXT NOT NULL,
+				checklist_id TEXT NOT NULL,
+				item_id TEXT NOT NULL,
+				label TEXT NOT NULL,
+				checked INTEGER NOT NULL DEFAULT 0,
+				position INTEGER NOT NULL,
+				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (account_id, checklist_id, item_id)
+			)`),
+		]);
 	});
 
 	it("returns service metadata from the root endpoint (unit style)", async () => {
@@ -34,7 +66,7 @@ describe("sgao-api worker", () => {
 		await waitOnExecutionContext(ctx);
 		expect(await response.json()).toEqual({
 			name: "sgao-api",
-			version: "0.1.0",
+			version: "0.2.0",
 			message: "Welcome to SGAO API",
 		});
 	});
@@ -43,7 +75,7 @@ describe("sgao-api worker", () => {
 		const response = await SELF.fetch("https://example.com");
 		expect(await response.json()).toEqual({
 			name: "sgao-api",
-			version: "0.1.0",
+			version: "0.2.0",
 			message: "Welcome to SGAO API",
 		});
 	});
@@ -112,5 +144,98 @@ describe("sgao-api worker", () => {
 
 		expect(response.status).toBe(204);
 		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://travel.sgao.cc");
+	});
+
+	it("allows credentialed account requests only from the Todo origin", async () => {
+		const response = await worker.fetch(
+			new IncomingRequest("https://api.sgao.cc/api/v1/account/checklists", {
+				method: "OPTIONS",
+				headers: {
+					Origin: "https://todo.sgao.cc",
+					"Access-Control-Request-Method": "POST",
+				},
+			}),
+			env,
+			createExecutionContext(),
+		);
+		expect(response.status).toBe(204);
+		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://todo.sgao.cc");
+		expect(response.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+		expect(response.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+	});
+
+	it("requires an Access identity for account endpoints", async () => {
+		const api = createAccountApi(async () => undefined);
+		const response = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists"),
+			env,
+			createExecutionContext(),
+		);
+		expect(response.status).toBe(401);
+		expect(await response.json()).toEqual({
+			error: { code: "AUTH_REQUIRED", message: "Sign in is required" },
+		});
+	});
+
+	it("initializes and restores a signed-in account snapshot", async () => {
+		const api = createAccountApi(async () => ({ email: "Owner@SGAO.cc" }));
+		const ctx = createExecutionContext();
+		const emptyResponse = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists"),
+			env,
+			ctx,
+		);
+		const emptyBody = await emptyResponse.json() as {
+			data: { initialized: boolean; account: { id: string; email: string }; lists: unknown[] };
+		};
+		expect(emptyBody.data.initialized).toBe(false);
+		expect(emptyBody.data.account.email).toBe("owner@sgao.cc");
+		expect(emptyBody.data.account.id).toHaveLength(64);
+		expect(emptyBody.data.lists).toEqual([]);
+
+		const lists = [{
+			id: "list-weekend",
+			slug: "weekend",
+			title: "周末出行",
+			description: "两天一夜",
+			items: [
+				{ id: "item-id-card", label: "身份证", checked: true },
+				{ id: "item-charger", label: "充电器", checked: false },
+			],
+		}];
+		const saveResponse = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists", {
+				method: "POST",
+				headers: { "Content-Type": "text/plain;charset=UTF-8" },
+				body: JSON.stringify({ lists }),
+			}),
+			env,
+			createExecutionContext(),
+		);
+		expect(saveResponse.status).toBe(200);
+		expect(await saveResponse.json()).toEqual({ data: { saved: true, listCount: 1 } });
+
+		const readResponse = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists"),
+			env,
+			createExecutionContext(),
+		);
+		expect(await readResponse.json()).toMatchObject({
+			data: { initialized: true, lists },
+		});
+	});
+
+	it("rejects an invalid account snapshot", async () => {
+		const api = createAccountApi(async () => ({ email: "owner@sgao.cc" }));
+		const response = await api.fetch(
+			new IncomingRequest("https://api.sgao.cc/checklists", {
+				method: "POST",
+				headers: { "Content-Type": "text/plain;charset=UTF-8" },
+				body: JSON.stringify({ lists: [{ id: "bad id" }] }),
+			}),
+			env,
+			createExecutionContext(),
+		);
+		expect(response.status).toBe(400);
 	});
 });
