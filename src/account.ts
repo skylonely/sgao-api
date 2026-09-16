@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 const TODO_ORIGIN = 'https://todo.sgao.cc';
+const ACCOUNT_RETURN_ORIGINS = new Set([TODO_ORIGIN, 'https://sgao.cc']);
 const IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_LISTS = 100;
@@ -133,7 +134,7 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 		if (returnTo) {
 			try {
 				const url = new URL(returnTo);
-				if (url.origin === TODO_ORIGIN) return c.redirect(url.toString(), 302);
+				if (ACCOUNT_RETURN_ORIGINS.has(url.origin) && !url.username && !url.password) return c.redirect(url.toString(), 302);
 			} catch {
 				// Fall through to the JSON session response.
 			}

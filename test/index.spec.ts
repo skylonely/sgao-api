@@ -148,7 +148,7 @@ describe("sgao-api worker", () => {
 		expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://travel.sgao.cc");
 	});
 
-	it("allows credentialed account requests only from the Todo origin", async () => {
+	it("allows credentialed account requests from the Todo origin", async () => {
 		const response = await worker.fetch(
 			new IncomingRequest("https://api.sgao.cc/api/v1/account/checklists", {
 				method: "OPTIONS",

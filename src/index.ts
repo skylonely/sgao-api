@@ -2,9 +2,11 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { Context } from 'hono';
 import { createAccountApi } from './account';
+import { createNavigationApi } from './navigation';
 
 const TRAVEL_ORIGIN = 'https://travel.sgao.cc';
 const TODO_ORIGIN = 'https://todo.sgao.cc';
+const MAIN_ORIGIN = 'https://sgao.cc';
 const VISITOR_ID_PATTERN = /^[a-z0-9_-]{16,128}$/i;
 const IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/;
 
@@ -24,7 +26,7 @@ const checklistCors = cors({
 });
 
 const accountCors = cors({
-	origin: TODO_ORIGIN,
+	origin: (origin) => [TODO_ORIGIN, MAIN_ORIGIN].includes(origin) ? origin : undefined,
 	allowMethods: ['GET', 'POST', 'OPTIONS'],
 	allowHeaders: ['Content-Type'],
 	credentials: true,
@@ -119,8 +121,13 @@ app.get('/health', (c) =>
 );
 
 app.use('/api/v1/checklists/*', checklistCors);
+app.use('/api/v1/account/*', async (c, next) => {
+	c.header('Cache-Control', 'private, no-store');
+	await next();
+});
 app.use('/api/v1/account/*', accountCors);
 
+apiV1.route('/account/navigation', createNavigationApi());
 apiV1.route('/account', createAccountApi());
 app.route('/api/v1', apiV1);
 
