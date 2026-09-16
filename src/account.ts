@@ -18,6 +18,7 @@ type SyncedChecklist = {
 	slug: string;
 	title: string;
 	description: string;
+	deletedAt: string | null;
 	items: SyncedItem[];
 };
 
@@ -41,6 +42,7 @@ export function parseSnapshot(value: unknown): SyncedChecklist[] | undefined {
 	for (const candidate of lists) {
 		if (!candidate || typeof candidate !== 'object') return undefined;
 		const list = candidate as Record<string, unknown>;
+		const deletedAt = list.deletedAt;
 		if (
 			!validString(list.id, 80)
 			|| !IDENTIFIER_PATTERN.test(list.id)
@@ -49,6 +51,8 @@ export function parseSnapshot(value: unknown): SyncedChecklist[] | undefined {
 			|| !validString(list.title, 60)
 			|| !list.title.trim()
 			|| !validString(list.description, 160)
+			|| (deletedAt !== undefined && deletedAt !== null
+				&& (!validString(deletedAt, 40) || Number.isNaN(Date.parse(deletedAt))))
 			|| !Array.isArray(list.items)
 			|| list.items.length > MAX_ITEMS_PER_LIST
 			|| listIds.has(list.id)
@@ -81,6 +85,7 @@ export function parseSnapshot(value: unknown): SyncedChecklist[] | undefined {
 			slug: list.slug,
 			title: list.title.trim(),
 			description: list.description.trim(),
+			deletedAt: typeof deletedAt === 'string' ? new Date(deletedAt).toISOString() : null,
 			items,
 		});
 	}
@@ -157,7 +162,7 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 
 		const [listsResult, itemsResult] = await c.env.CHECKLISTS_DB.batch([
 			c.env.CHECKLISTS_DB.prepare(
-				'SELECT checklist_id, slug, title, description FROM account_checklists WHERE account_id = ? ORDER BY position',
+				'SELECT checklist_id, slug, title, description, deleted_at FROM account_checklists WHERE account_id = ? ORDER BY position',
 			).bind(signedIn.id),
 			c.env.CHECKLISTS_DB.prepare(
 				'SELECT checklist_id, item_id, label, checked FROM account_checklist_items WHERE account_id = ? ORDER BY checklist_id, position',
@@ -175,6 +180,7 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 			slug: String(row.slug),
 			title: String(row.title),
 			description: String(row.description),
+			deletedAt: typeof row.deleted_at === 'string' ? row.deleted_at : null,
 			items: itemsByList.get(String(row.checklist_id)) ?? [],
 		}));
 		return c.json({
@@ -220,15 +226,15 @@ export function createAccountApi(resolveIdentity: IdentityResolver = accessIdent
 			).bind(signedIn.id, signedIn.id, revision),
 		];
 		const listRows = lists.map((list, position): Array<string | number> => [
-			signedIn.id, list.id, list.slug, list.title, list.description, position,
+			signedIn.id, list.id, list.slug, list.title, list.description, list.deletedAt ?? '', position,
 		]);
 		for (let index = 0; index < listRows.length; index += ROWS_PER_INSERT) {
 			const rows = listRows.slice(index, index + ROWS_PER_INSERT);
-			const placeholders = rows.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
+			const placeholders = rows.map(() => "(?, ?, ?, ?, ?, NULLIF(?, ''), ?)").join(', ');
 			statements.push(c.env.CHECKLISTS_DB.prepare(
-				`WITH rows(account_id, checklist_id, slug, title, description, position) AS (VALUES ${placeholders})
-				INSERT INTO account_checklists (account_id, checklist_id, slug, title, description, position)
-				SELECT account_id, checklist_id, slug, title, description, position FROM rows
+				`WITH rows(account_id, checklist_id, slug, title, description, deleted_at, position) AS (VALUES ${placeholders})
+				INSERT INTO account_checklists (account_id, checklist_id, slug, title, description, deleted_at, position)
+				SELECT account_id, checklist_id, slug, title, description, deleted_at, position FROM rows
 				WHERE EXISTS (
 					SELECT 1 FROM account_profiles WHERE account_id = ? AND revision = ?
 				)`,

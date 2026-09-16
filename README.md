@@ -95,13 +95,16 @@ Writes atomically replace the small snapshot and increment the revision; a stale
 revision returns `409 SYNC_CONFLICT` without changing stored data. Browser
 requests are credentialed and allowed only from `https://todo.sgao.cc`. The
 write uses `text/plain` JSON so it remains a simple CORS request and does not
-require an unauthenticated preflight through Access.
+require an unauthenticated preflight through Access. A checklist may include a
+nullable ISO `deletedAt` timestamp; the Todo frontend uses it to synchronize the
+30-day recycle bin across devices.
 
 Apply the account schema before deploying:
 
 ```sh
 npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0002_account_checklists.sql
 npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0003_account_revision.sql
+npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0004_checklist_recycle_bin.sql
 ```
 
 In Cloudflare Zero Trust, create a self-hosted application for only the account

@@ -40,6 +40,7 @@ describe("sgao-api worker", () => {
 				slug TEXT NOT NULL,
 				title TEXT NOT NULL,
 				description TEXT NOT NULL DEFAULT '',
+				deleted_at TEXT,
 				position INTEGER NOT NULL,
 				updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
 				PRIMARY KEY (account_id, checklist_id),
@@ -207,6 +208,7 @@ describe("sgao-api worker", () => {
 			slug: "weekend",
 			title: "周末出行",
 			description: "两天一夜",
+			deletedAt: "2026-09-16T02:00:00.000Z",
 			items: [
 				{ id: "item-id-card", label: "身份证", checked: true },
 				{ id: "item-charger", label: "充电器", checked: false },
