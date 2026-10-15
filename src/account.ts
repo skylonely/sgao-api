@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 
 const TODO_ORIGIN = 'https://todo.sgao.cc';
-const ACCOUNT_RETURN_ORIGINS = new Set([TODO_ORIGIN, 'https://sgao.cc']);
+const ACCOUNT_RETURN_ORIGINS = new Set([TODO_ORIGIN, 'https://sgao.cc', 'https://notes.sgao.cc']);
 const IDENTIFIER_PATTERN = /^[a-z0-9][a-z0-9_-]{0,79}$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_LISTS = 100;

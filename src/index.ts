@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import type { Context } from 'hono';
 import { createAccountApi } from './account';
 import { createNavigationApi } from './navigation';
+import { createNotesApi } from './notes';
 
 const TRAVEL_ORIGIN = 'https://travel.sgao.cc';
 const TODO_ORIGIN = 'https://todo.sgao.cc';
@@ -26,7 +27,7 @@ const checklistCors = cors({
 });
 
 const accountCors = cors({
-	origin: (origin) => [TODO_ORIGIN, MAIN_ORIGIN].includes(origin) ? origin : undefined,
+	origin: (origin) => [TODO_ORIGIN, MAIN_ORIGIN, 'https://notes.sgao.cc'].includes(origin) ? origin : undefined,
 	allowMethods: ['GET', 'POST', 'OPTIONS'],
 	allowHeaders: ['Content-Type'],
 	credentials: true,
@@ -127,6 +128,7 @@ app.use('/api/v1/account/*', async (c, next) => {
 });
 app.use('/api/v1/account/*', accountCors);
 
+apiV1.route('/account/notes', createNotesApi());
 apiV1.route('/account/navigation', createNavigationApi());
 apiV1.route('/account', createAccountApi());
 app.route('/api/v1', apiV1);
