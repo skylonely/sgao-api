@@ -150,3 +150,17 @@ npx wrangler d1 execute sgao-api-checklists --remote --file=migrations/0005_acco
 
 Local verification: `npm test -- --run` and `npx tsc --noEmit`. Worker tests use
 isolated test databases; they do not apply migrations to production.
+
+Account notes sync
+
+`GET /api/v1/account/notes` reads notes and `POST /api/v1/account/notes/:id`
+saves one note using its last-read revision. Stale writes return 409 with the
+current note; the frontend preserves divergent edits as a separate copy.
+
+Notes reuse the existing Access login and additionally allow only the verified
+identity `gsios602@gmail.com`. Other identities accepted by shared Access cannot
+read or write notes. The write origin is restricted to `https://notes.sgao.cc`.
+
+The additive `migrations/0006_account_notes.sql` creates the independent
+`account_notes` table in the existing D1 database. Apply it before the first
+notes API deployment. Deleted notes retain a tombstone for device synchronization.

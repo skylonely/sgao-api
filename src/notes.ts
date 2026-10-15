@@ -12,6 +12,7 @@ type Row = {
   created_at: string; updated_at: string; deleted_at: string | null; revision: number;
 };
 const ORIGIN = 'https://notes.sgao.cc';
+const OWNER_EMAIL = 'gsios602@gmail.com';
 const identifier = /^[a-z0-9][a-z0-9_-]{0,79}$/i;
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const timestamp = (v: unknown): v is string => typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v));
@@ -30,7 +31,7 @@ export function parseNote(value: unknown): Note | undefined {
   return value as Note;
 }
 
-export function createNotesApi(resolveIdentity: IdentityResolver = accessIdentity) {
+export function createNotesApi(resolveIdentity: IdentityResolver = accessIdentity, ownerEmail = OWNER_EMAIL) {
   const api = new Hono<AppEnv>();
   api.use('*', bodyLimit({ maxSize: 512 * 1024,
     onError: c => c.json({ error: { code: 'PAYLOAD_TOO_LARGE', message: 'Note exceeds 512 KiB' } }, 413) }));
@@ -38,6 +39,7 @@ export function createNotesApi(resolveIdentity: IdentityResolver = accessIdentit
     const signedIn = await resolveIdentity(c);
     if (!signedIn?.email.trim()) return undefined;
     const email = signedIn.email.trim().toLowerCase();
+    if (email !== ownerEmail.trim().toLowerCase()) return undefined;
     return { id: await accountId(email), email };
   }
   api.get('/', async c => {

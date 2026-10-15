@@ -16,7 +16,7 @@ describe('account notes', () => {
     await env.CHECKLISTS_DB.prepare('DELETE FROM account_notes').run();
   });
   async function call(email: string | undefined = 'owner@sgao.cc', payload?: unknown, origin = ORIGIN, id = note.id) {
-    const api = createNotesApi(async () => email ? { email } : undefined);
+    const api = createNotesApi(async () => email ? { email } : undefined, 'owner@sgao.cc');
     return api.fetch(new Request('https://api.sgao.cc/' + (payload === undefined ? '' : id), {
       method: payload === undefined ? 'GET' : 'POST', headers: { Origin: origin, 'Content-Type': 'text/plain;charset=UTF-8' },
       ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
@@ -26,7 +26,8 @@ describe('account notes', () => {
   it('requires a verified identity and rejects account spoofing', async () => {
     expect((await call('')).status).toBe(401);
     expect((await call('', await payload())).status).toBe(401);
-    expect((await call('other@sgao.cc', await payload())).status).toBe(409);
+    expect((await call('other@sgao.cc', await payload())).status).toBe(401);
+    expect((await call('owner@sgao.cc', { ...await payload(), accountId: await accountId('other@sgao.cc') })).status).toBe(409);
     expect(await (await call()).json()).toMatchObject({ data: { notes: [] } });
   });
   it('creates, reads, edits, pins and synchronizes deletion', async () => {
@@ -49,7 +50,7 @@ describe('account notes', () => {
   });
   it('isolates accounts and per-note revisions', async () => {
     await call('owner@sgao.cc', await payload());
-    expect(await (await call('other@sgao.cc')).json()).toMatchObject({ data: { notes: [] } });
+    expect((await call('other@sgao.cc')).status).toBe(401);
     expect((await call('owner@sgao.cc', await payload({ ...note, id: 'note-two' }), ORIGIN, 'note-two')).status).toBe(200);
     expect(await (await call()).json()).toMatchObject({ data: { notes: expect.arrayContaining([{ ...note, updatedAt: expect.any(String), revision: 1 }]) } });
   });
@@ -62,6 +63,14 @@ describe('account notes', () => {
       expect((await call('owner@sgao.cc', { accountId: await accountId('owner@sgao.cc'), note: invalid })).status).toBe(400);
     }
     expect((await call('owner@sgao.cc', { accountId: await accountId('owner@sgao.cc'), note: { ...note, content: 'x'.repeat(600_000) } })).status).toBe(413);
+  });
+  it('permits only the configured owner even when another identity passes shared Access', async () => {
+    for (const email of ['owner@sgao.cc', 'other@gmail.com']) {
+      const api = createNotesApi(async () => ({ email }));
+      expect((await api.fetch(new Request('https://api.sgao.cc/'), env, createExecutionContext())).status).toBe(401);
+    }
+    const ownerApi = createNotesApi(async () => ({ email: ' GSIOS602@gmail.com ' }));
+    expect((await ownerApi.fetch(new Request('https://api.sgao.cc/'), env, createExecutionContext())).status).toBe(200);
   });
   it('mounts the endpoint, allows only the exact notes origin and redirects login back to notes', async () => {
     expect((await worker.fetch(new Request('https://api.sgao.cc/api/v1/account/notes'), env, createExecutionContext())).status).toBe(401);
